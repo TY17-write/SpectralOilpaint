@@ -1,0 +1,117 @@
+<!doctype html><meta charset="utf-8" /><style>
+  body {
+    font: 13px sans-serif;
+  }
+  #cases {
+    display: flex;
+    gap: 8px;
+  }
+  img {
+    width: 192px;
+    height: 384px;
+  }
+  pre {
+    white-space: pre-wrap;
+  }
+</style>
+<div id="cases"></div>
+<pre>Running</pre>
+<script type="module">
+  import { OilEngine } from "../src/engine.js";
+  import { paint, pack, unhalf } from "../src/color.js";
+  try {
+    const tables = await fetch("../reference/tables.json").then((r) =>
+        r.json(),
+      ),
+      e = await OilEngine.create(document.createElement("canvas"), tables, {
+        nx: 384,
+        ny: 768,
+        nl: 2,
+        width: (384 * 0.5) / 1024,
+        tiltY: 15,
+        shading: false,
+      }),
+      logs = [];
+    try {
+      const N = 384 * 768,
+        a = new Float32Array(N * 4),
+        s = new Uint32Array(N * 20),
+        paints = [paint([240, 210, 84], tables), paint([44, 100, 150], tables)];
+      for (let y = 0; y < 768; y++)
+        for (let x = 0; x < 384; x++) {
+          for (let k = 0; k < 2; k++) {
+            const rr = Math.hypot((x - 192) / 110, (y - (k ? 385 : 135)) / 85);
+            if (rr >= 1) continue;
+            const i = y * 384 + x,
+              d = 0.003 * Math.min(1, (1 - rr) * 8),
+              p = paints[k];
+            a[i * 4] = d;
+            a[i * 4 + 1] = d * 0.15;
+            for (let j = 0; j < 19; j++)
+              s[i * 20 + j] = pack(p.a[2 * j], p.a[2 * j + 1]);
+            s[i * 20 + 19] = pack(p.beta, 0);
+          }
+        }
+      e.device.queue.writeBuffer(e.buffers.l0, 0, a);
+      e.device.queue.writeBuffer(e.buffers.s0, 0, s);
+      for (let frame = 0; frame <= 3600; frame++) {
+        if (frame) {
+          e.step({ present: false });
+          if (frame % 20 === 0) await e.device.queue.onSubmittedWorkDone();
+        }
+        if (![0, 120, 600, 1800, 3600].includes(frame)) continue;
+        e.step({ fluid: false });
+        await e.device.queue.onSubmittedWorkDone();
+        const blob = await e.exportPNG(),
+          bmp = await createImageBitmap(blob),
+          c = new OffscreenCanvas(384, 768),
+          ctx = c.getContext("2d");
+        ctx.drawImage(bmp, 0, 0);
+        const px = ctx.getImageData(0, 0, 384, 768).data;
+        let pink = 0,
+          worst = 0;
+        for (let i = 0; i < N; i++) {
+          const score = Math.min(px[i * 4], px[i * 4 + 2]) - px[i * 4 + 1];
+          if (score > 10) pink++;
+          worst = Math.max(worst, score);
+        }
+        const ls = new Float32Array(await e.read("l0")),
+          sp = new Uint32Array(await e.read("s0"));
+        let spectralError = 0;
+        for (let i = 0; i < N; i++) {
+          if (ls[i * 4 + 1] < 1e-6) continue;
+          const beta = unhalf(sp[i * 20 + 19] & 65535),
+            w = (beta - paints[1].beta) / (paints[0].beta - paints[1].beta);
+          for (let j = 0; j < 38; j++) {
+            const v = unhalf((sp[i * 20 + (j >> 1)] >> ((j % 2) * 16)) & 65535),
+              expected = w * paints[0].a[j] + (1 - w) * paints[1].a[j];
+            spectralError = Math.max(
+              spectralError,
+              Math.abs(v - expected) /
+                Math.max(paints[0].a[j], paints[1].a[j], 1),
+            );
+          }
+        }
+        logs.push({ frame, pink, worst, spectralError });
+        const el = document.createElement("section"),
+          img = document.createElement("img");
+        el.textContent = frame + " frames";
+        img.src = URL.createObjectURL(blob);
+        el.append(img);
+        document.querySelector("#cases").append(el);
+      }
+      window.testResult = {
+        ok:
+          e.errors.length === 0 &&
+          logs.every((v) => v.pink === 0 && v.spectralError < 0.05),
+        logs,
+        errors: e.errors,
+      };
+    } finally {
+      e.destroy();
+    }
+  } catch (e) {
+    window.testResult = { ok: false, error: e.stack };
+  }
+  document.querySelector("pre").textContent = JSON.stringify(window.testResult);
+</script>

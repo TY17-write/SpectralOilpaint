@@ -1,0 +1,102 @@
+<!doctype html><meta charset="utf-8" /><title>Wide white brush regression</title
+><style>
+  body {
+    margin: 0;
+    background: #ddd;
+  }
+  canvas {
+    width: 1024px;
+    height: 768px;
+    display: block;
+  }
+  pre {
+    white-space: pre-wrap;
+  }</style
+><canvas></canvas>
+<pre>Running</pre>
+<script type="module">
+  import { OilEngine } from "../src/engine.js";
+  try {
+    const tables = await fetch("../reference/tables.json").then((r) =>
+      r.json(),
+    );
+    const e = await OilEngine.create(document.querySelector("canvas"), tables, {
+      radius: 128,
+    });
+    e.color = "#ffffff";
+    let time = 0;
+    for (let row = 0; row < 5; row++) {
+      const y = 100 + row * 140,
+        left = row % 2 ? 940 : 84,
+        right = row % 2 ? 84 : 940;
+      e.beginStroke({ x: left, y, pressure: 0.75, time });
+      for (let j = 1; j <= 36; j++) {
+        time += 16;
+        e.moveStroke({
+          x: left + ((right - left) * j) / 36,
+          y: y + 15 * Math.sin(j * 0.2),
+          pressure: 0.75,
+          time,
+        });
+        e.step();
+        await e.device.queue.onSubmittedWorkDone();
+      }
+      e.endStroke();
+    }
+    for (let i = 0; i < 5; i++) {
+      e.step();
+      await e.device.queue.onSubmittedWorkDone();
+    }
+    window.whiteEngine = e;
+    const N = e.config.nx * e.config.ny,
+      ls = await Promise.all(
+        [0, 1].map(async (k) => new Float32Array(await e.read("l" + k))),
+      );
+    let maxHeight = 0,
+      maxJump = 0;
+    for (let i = 0; i < N; i++) {
+      const h = ls[0][i * 4] + ls[1][i * 4];
+      maxHeight = Math.max(maxHeight, h);
+      if (i % 1024)
+        maxJump = Math.max(
+          maxJump,
+          Math.abs(h - ls[0][(i - 1) * 4] - ls[1][(i - 1) * 4]),
+        );
+    }
+    async function pixels() {
+      const bitmap = await createImageBitmap(await e.exportPNG());
+      const c = new OffscreenCanvas(bitmap.width, bitmap.height),
+        ctx = c.getContext("2d");
+      ctx.drawImage(bitmap, 0, 0);
+      const bytes = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+      let min = 255,
+        max = 0;
+      for (let i = 0; i < bytes.length; i += 4) {
+        min = Math.min(min, bytes[i], bytes[i + 1], bytes[i + 2]);
+        max = Math.max(max, bytes[i], bytes[i + 1], bytes[i + 2]);
+      }
+      return { min, max };
+    }
+    const shaded = await pixels();
+    e.config.shading = false;
+    e.step({ fluid: false });
+    const albedo = await pixels();
+    e.config.shading = true;
+    e.step({ fluid: false });
+    await e.device.queue.onSubmittedWorkDone();
+    window.testResult = {
+      ok:
+        e.errors.length === 0 &&
+        albedo.min >= 253 &&
+        albedo.max - albedo.min <= 1 &&
+        shaded.min >= 225 &&
+        shaded.max - shaded.min <= 15 &&
+        maxJump < 0.0001,
+      logs: [{ maxHeight, maxJump, shaded, albedo }],
+      errors: e.errors,
+    };
+  } catch (e) {
+    window.testResult = { ok: false, error: e.stack || e.message };
+  }
+  document.querySelector("pre").textContent = JSON.stringify(window.testResult);
+</script>

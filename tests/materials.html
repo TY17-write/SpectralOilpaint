@@ -1,0 +1,165 @@
+<!doctype html><meta charset="utf-8" /><style>
+  body {
+    font: 14px sans-serif;
+  }
+  #cases {
+    display: grid;
+    grid-template-columns: repeat(4, 256px);
+    gap: 8px;
+  }
+  img {
+    width: 256px;
+    height: 128px;
+  }
+  pre {
+    white-space: pre-wrap;
+  }
+</style>
+<div id="cases"></div>
+<pre>Running</pre>
+<script type="module">
+  import { OilEngine } from "../src/engine.js";
+  import { paint, pack } from "../src/color.js";
+  const tables = await fetch("../reference/tables.json").then((r) => r.json()),
+    logs = [];
+  async function tick(e) {
+    e.step({ fluid: false });
+    await e.device.queue.onSubmittedWorkDone();
+  }
+  async function rgb(e, x, y) {
+    const b = await createImageBitmap(await e.exportPNG()),
+      c = new OffscreenCanvas(256, 128),
+      ctx = c.getContext("2d");
+    ctx.drawImage(b, 0, 0);
+    return Array.from(ctx.getImageData(x, y, 1, 1).data).slice(0, 3);
+  }
+  async function shot(e, title) {
+    const section = document.createElement("section"),
+      img = document.createElement("img");
+    section.textContent = title;
+    img.src = URL.createObjectURL(await e.exportPNG());
+    section.append(img);
+    document.querySelector("#cases").append(section);
+  }
+  async function stroke(e, color, pts, pressure = 0.75, empty = false) {
+    e.color = color;
+    e.beginStroke({ x: pts[0][0], y: pts[0][1], pressure, time: 0 }, { empty });
+    for (let j = 1; j < pts.length; j++)
+      e.moveStroke({ x: pts[j][0], y: pts[j][1], pressure, time: j * 100 });
+    e.endStroke();
+    await tick(e);
+  }
+  try {
+    for (const phi of [1, 0.5, 0.1, 0.02]) {
+      const e = await OilEngine.create(
+        document.createElement("canvas"),
+        tables,
+        { nx: 256, ny: 128, nl: 2, width: 0.125, shading: false },
+      );
+      try {
+        const N = 256 * 128,
+          bed = new ArrayBuffer(N * 80),
+          bf = new Float32Array(bed),
+          bu = new Uint32Array(bed),
+          l = new Float32Array(N * 4),
+          s = new Uint32Array(N * 20),
+          p = paint([200, 50, 40], tables);
+        for (let i = 0; i < N; i++) {
+          const x = i % 256,
+            y = Math.floor(i / 256),
+            g = (Math.floor(x / 32) + Math.floor(y / 32)) % 2 ? 0.05 : 0.95;
+          for (let j = 0; j < 19; j++) bu[i * 20 + 1 + j] = pack(g, g);
+          l[i * 4] = 0.00015;
+          l[i * 4 + 1] = 0.00015 * phi;
+          for (let j = 0; j < 19; j++)
+            s[i * 20 + j] = pack(p.a[j * 2], p.a[j * 2 + 1]);
+          s[i * 20 + 19] = pack(p.beta, 0);
+        }
+        e.device.queue.writeBuffer(e.buffers.bed, 0, bed);
+        e.device.queue.writeBuffer(e.buffers.l0, 0, l);
+        e.device.queue.writeBuffer(e.buffers.s0, 0, s);
+        await tick(e);
+        logs.push({
+          test: "dilution / equal film thickness",
+          phi,
+          light: await rgb(e, 16, 16),
+          dark: await rgb(e, 48, 16),
+        });
+        await shot(e, "Pigment " + phi * 100 + "%");
+      } finally {
+        e.destroy();
+      }
+    }
+    for (const setting of [
+      { name: "Wet / loaded blue" },
+      { name: "Wet / empty brush", empty: true },
+      { name: "Dry / loaded blue", dry: true },
+    ]) {
+      const e = await OilEngine.create(
+        document.createElement("canvas"),
+        tables,
+        {
+          nx: 256,
+          ny: 128,
+          nl: 2,
+          width: 0.125,
+          shading: false,
+          radius: 32,
+          phi: 1,
+        },
+      );
+      try {
+        await stroke(e, "#c83228", [
+          [35, 40],
+          [220, 40],
+        ]);
+        await stroke(e, "#2c6496", [
+          [35, 88],
+          [220, 88],
+        ]);
+        if (setting.dry) {
+          e.dryRequested = true;
+          await tick(e);
+        }
+        const before = await rgb(e, 128, 40);
+        for (let j = 0; j < 5; j++)
+          await stroke(
+            e,
+            "#2c6496",
+            j % 2
+              ? [
+                  [128, 106],
+                  [128, 22],
+                ]
+              : [
+                  [128, 22],
+                  [128, 106],
+                ],
+            0.75,
+            setting.empty,
+          );
+        const after = await rgb(e, 128, 40);
+        logs.push({ test: setting.name, before, after });
+        await shot(e, setting.name);
+        if (e.errors.length) throw Error(e.errors.join("\n"));
+      } finally {
+        e.destroy();
+      }
+    }
+    const contrasts = logs
+      .slice(0, 4)
+      .map((v) => Math.hypot(...v.light.map((x, i) => x - v.dark[i])));
+    if (contrasts.some((v, i) => i > 0 && v <= contrasts[i - 1] + 5))
+      throw Error("Dilution does not reveal ground");
+    const wet = logs[4],
+      dry = logs[6];
+    if (Math.hypot(...wet.after.map((x, i) => x - dry.after[i])) < 15)
+      throw Error("Wet paint fails to mix");
+    if (Math.hypot(...logs[5].after.map((x, i) => x - logs[5].before[i])) < 10)
+      throw Error("Empty brush fails to mix tube paint");
+    window.testResult = { ok: true, logs };
+  } catch (e) {
+    window.testResult = { ok: false, error: e.stack, logs };
+  }
+  document.querySelector("pre").textContent = JSON.stringify(window.testResult);
+</script>

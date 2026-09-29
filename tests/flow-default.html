@@ -1,0 +1,83 @@
+<!doctype html><meta charset="utf-8" /><canvas></canvas>
+<pre>Running</pre>
+<script type="module">
+  import { OilEngine } from "../src/engine.js";
+  try {
+    const tables = await fetch("../reference/tables.json").then((r) =>
+        r.json(),
+      ),
+      logs = [];
+    for (const phi of [0.1, 0.3, 0.5, 1]) {
+      const e = await OilEngine.create(
+        document.querySelector("canvas"),
+        tables,
+        {
+          nx: 128,
+          ny: 96,
+          nl: 2,
+          width: (128 * 0.5) / 1024,
+          tiltX: 30,
+          shading: false,
+        },
+      );
+      try {
+        const n = 128 * 96,
+          a = new Float32Array(n * 4);
+        for (let y = 20; y < 44; y++)
+          for (let x = 30; x < 54; x++) {
+            const i = (y * 128 + x) * 4;
+            a[i] = 0.001;
+            a[i + 1] = 0.001 * phi;
+          }
+        e.device.queue.writeBuffer(e.buffers.l0, 0, a);
+        const measure = async () => {
+          let d = 0,
+            p = 0,
+            cx = 0;
+          for (const k of [0, 1]) {
+            const f = new Float32Array(await e.read("l" + k));
+            for (let i = 0; i < n; i++) {
+              if (!Number.isFinite(f[i * 4]) || f[i * 4] < 0)
+                throw Error("Invalid depth");
+              d += f[i * 4];
+              p += f[i * 4 + 1];
+              cx += f[i * 4] * (i % 128);
+            }
+          }
+          return { d, p, cx: cx / d };
+        };
+        const before = await measure();
+        for (let i = 0; i < 600; i++) {
+          e.step({ present: false });
+          if (i % 10 === 9) await e.device.queue.onSubmittedWorkDone();
+        }
+        const after = await measure();
+        const volumeError = Math.abs(after.d - before.d) / before.d,
+          pigmentError = Math.abs(after.p - before.p) / before.p,
+          movement = after.cx - before.cx;
+        if (
+          volumeError > 1e-5 ||
+          pigmentError > 1e-5 ||
+          movement < -0.001 ||
+          e.errors.length
+        )
+          throw Error("Conservation/flow failure");
+        logs.push({ phi, volumeError, pigmentError, movementPixels: movement });
+      } finally {
+        e.destroy();
+      }
+    }
+    if (
+      logs[0].movementPixels < 1 ||
+      Math.abs(logs[3].movementPixels) > 0.001 ||
+      logs.some(
+        (v, i) => i > 0 && v.movementPixels > logs[i - 1].movementPixels + 0.01,
+      )
+    )
+      throw Error("Concentration response is not monotonic");
+    window.testResult = { ok: true, logs };
+  } catch (e) {
+    window.testResult = { ok: false, error: e.stack };
+  }
+  document.querySelector("pre").textContent = JSON.stringify(window.testResult);
+</script>

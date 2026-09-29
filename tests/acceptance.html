@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8" /><title>GPU acceptance</title
+><canvas></canvas>
+<pre>Running</pre>
+<script type="module">
+  import { acceptanceGPU } from "./fluid-gpu.js";
+  try {
+    const tables = await fetch("../reference/tables.json").then((r) =>
+      r.json(),
+    );
+    window.testResult = {
+      ok: true,
+      logs: await acceptanceGPU(document.querySelector("canvas"), tables),
+    };
+  } catch (e) {
+    window.testResult = { ok: false, error: e.stack || e.message };
+  }
+  document.querySelector("pre").textContent = JSON.stringify(window.testResult);
+</script>

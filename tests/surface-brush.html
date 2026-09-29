@@ -1,0 +1,114 @@
+<!doctype html><meta charset="utf-8" />
+<pre>Running</pre>
+<script type="module">
+  import { OilEngine } from "../src/engine.js";
+  import { paint, pack, unhalf } from "../src/color.js";
+  const tables = await fetch("../reference/tables.json").then((r) => r.json()),
+    logs = [];
+  async function tick(e) {
+    e.step({ fluid: false });
+    await e.device.queue.onSubmittedWorkDone();
+  }
+  async function total(e) {
+    let d = 0,
+      p = 0;
+    for (let k = 0; k < e.config.nl; k++) {
+      const a = new Float32Array(await e.read("l" + k));
+      for (let i = 0; i < a.length; i += 4) {
+        if (a[i] < 0 || a[i + 1] < 0 || a[i + 1] > a[i] + 1e-8)
+          throw Error("Invalid paint");
+        d += a[i];
+        p += a[i + 1];
+      }
+    }
+    const b = new Float32Array(await e.read("brush"));
+    for (let i = 0; i < b.length; i += 22) {
+      d += b[i];
+      p += b[i + 1];
+    }
+    return { d, p };
+  }
+  try {
+    for (const depth of [0.0005, 0.003]) {
+      const e = await OilEngine.create(
+          document.createElement("canvas"),
+          tables,
+          {
+            nx: 96,
+            ny: 64,
+            nl: 2,
+            width: (96 * 0.5) / 1024,
+            shading: false,
+            radius: 18,
+          },
+        ),
+        N = 96 * 64,
+        red = paint([200, 50, 40], tables),
+        white = paint([255, 250, 240], tables);
+      try {
+        const a = new Float32Array(N * 4),
+          s = new Uint32Array(N * 20);
+        for (let i = 0; i < N; i++) {
+          a[i * 4] = depth;
+          a[i * 4 + 1] = depth;
+          for (let j = 0; j < 19; j++)
+            s[i * 20 + j] = pack(red.a[2 * j], red.a[2 * j + 1]);
+          s[i * 20 + 19] = pack(red.beta, 0);
+        }
+        e.device.queue.writeBuffer(e.buffers.l0, 0, a);
+        e.device.queue.writeBuffer(e.buffers.s0, 0, s);
+        e.color = "#fffaf0";
+        e.beginStroke({ x: 48, y: 32, pressure: 0.2, time: 0 });
+        e.endStroke();
+        await tick(e);
+        const layers = [];
+        for (let k = 0; k < 2; k++) {
+          const a = new Float32Array(await e.read("l" + k)),
+            s = new Uint32Array(await e.read("s" + k)),
+            i = 32 * 96 + 48,
+            beta = unhalf(s[i * 20 + 19] & 65535);
+          layers.push({
+            depth: a[i * 4],
+            whiteFraction: (beta - red.beta) / (white.beta - red.beta),
+          });
+        }
+        if (
+          layers[1].depth > 0.00003 ||
+          layers[1].whiteFraction < 0.1 ||
+          Math.abs(layers[0].whiteFraction) > 0.002
+        )
+          throw Error("Contact mixed the entire pile");
+        logs.push({ depth, layers });
+        // Start an empty brush, then account for both paint left on the canvas and picked up.
+        e.beginStroke(
+          { x: 20, y: 32, pressure: 0.75, time: 0 },
+          { empty: true },
+        );
+        await tick(e);
+        const before = await total(e);
+        for (let j = 1; j <= 8; j++) {
+          e.moveStroke({ x: 20 + j * 7, y: 32, pressure: 0.75, time: j * 40 });
+          await tick(e);
+        }
+        e.endStroke();
+        const after = await total(e);
+        const volumeError = Math.abs(after.d - before.d) / before.d,
+          pigmentError = Math.abs(after.p - before.p) / before.p;
+        if (volumeError > 1e-5 || pigmentError > 1e-5)
+          throw Error("Brush exchange lost paint");
+        logs.push({
+          test: "Empty brush conservation",
+          volumeError,
+          pigmentError,
+        });
+        if (e.errors.length) throw Error(e.errors.join("\n"));
+      } finally {
+        e.destroy();
+      }
+    }
+    window.testResult = { ok: true, logs };
+  } catch (e) {
+    window.testResult = { ok: false, error: e.stack, logs };
+  }
+  document.querySelector("pre").textContent = JSON.stringify(window.testResult);
+</script>

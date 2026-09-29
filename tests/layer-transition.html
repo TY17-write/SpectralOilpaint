@@ -1,0 +1,96 @@
+<!doctype html><meta charset="utf-8" />
+<pre>Running</pre>
+<script type="module">
+  import { OilEngine } from "../src/engine.js";
+  const tables = await fetch("../reference/tables.json").then((r) => r.json()),
+    logs = [];
+  async function step(e) {
+    e.step({ fluid: false });
+    await e.device.queue.onSubmittedWorkDone();
+  }
+  async function stroke(e, color, pressure, points) {
+    e.color = color;
+    e.beginStroke({ x: points[0][0], y: points[0][1], pressure, time: 0 });
+    for (const [x, y] of points.slice(1))
+      e.moveStroke({ x, y, pressure, time: 500 });
+    e.endStroke();
+    await step(e);
+  }
+  async function state(e) {
+    const layers = [];
+    for (let k = 0; k < e.config.nl; k++) {
+      const a = new Float32Array(await e.read("l" + k));
+      layers.push(
+        Array.from(a.slice((48 * 128 + 64) * 4, (48 * 128 + 64) * 4 + 3)),
+      );
+    }
+    const b = await createImageBitmap(await e.exportPNG()),
+      c = new OffscreenCanvas(128, 96),
+      ctx = c.getContext("2d");
+    ctx.drawImage(b, 0, 0);
+    return {
+      rgb: Array.from(ctx.getImageData(64, 48, 1, 1).data).slice(0, 3),
+      layers,
+    };
+  }
+  try {
+    for (const setting of [
+      { nl: 2, pressure: 0 },
+      { nl: 2, pressure: 0.000001 },
+      { nl: 2, pressure: 0.001 },
+      { nl: 2, pressure: 0.75 },
+      { nl: 2, pressure: 0.001, color: "#2c6496" },
+      { nl: 3, pressure: 0.001 },
+      { nl: 3, pressure: 0.001, fourth: true },
+    ]) {
+      const e = await OilEngine.create(
+        document.createElement("canvas"),
+        tables,
+        {
+          nx: 128,
+          ny: 96,
+          nl: setting.nl,
+          width: (128 * 0.5) / 1024,
+          radius: 30,
+          phi: 1,
+          shading: false,
+        },
+      );
+      try {
+        e.config.referenceMode = true;
+        await stroke(e, "#c83228", 0.75, [
+          [20, 48],
+          [108, 48],
+        ]);
+        await stroke(e, "#2c6496", 0.75, [
+          [64, 12],
+          [64, 84],
+        ]);
+        if (setting.fourth)
+          await stroke(e, "#fffaf0", 0.75, [
+            [20, 48],
+            [108, 48],
+          ]);
+        e.config.referenceMode = false;
+        const before = await state(e);
+        await stroke(e, setting.color ?? "#fffaf0", setting.pressure, [
+          [64, 48],
+        ]);
+        const after = await state(e);
+        if (
+          setting.pressure <= 0.001 &&
+          after.rgb.some((v, i) => Math.abs(v - before.rgb[i]) > 3)
+        )
+          throw Error("Discontinuous light contact");
+        logs.push({ ...setting, before, after });
+        if (e.errors.length) throw Error(e.errors.join("\n"));
+      } finally {
+        e.destroy();
+      }
+    }
+    window.testResult = { ok: true, logs };
+  } catch (e) {
+    window.testResult = { ok: false, error: e.stack, logs };
+  }
+  document.querySelector("pre").textContent = JSON.stringify(window.testResult);
+</script>

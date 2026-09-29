@@ -1,0 +1,23 @@
+{
+  "name": "spectral-oilpaint",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:gpu": "node tests/browser.mjs gpu.html",
+    "test:fluid": "node tests/browser.mjs acceptance.html",
+    "test:brush": "node tests/browser.mjs brush.html",
+    "test:tiles": "node tests/browser.mjs tiles.html",
+    "test:white": "node tests/browser.mjs white.html wide-white-fixed.png",
+    "test:performance": "node tests/browser.mjs performance.html",
+    "test:overpaint": "node tests/browser.mjs white-over-red.html white-over-red-fixed.png",
+    "test:flow-default": "node tests/browser.mjs flow-default.html",
+    "test:outflow": "node tests/browser.mjs outflow.html",
+    "test:materials": "node tests/browser.mjs materials.html materials-after.png",
+    "test:contact": "node tests/browser.mjs layer-transition.html",
+    "test:flow-color": "node tests/browser.mjs blob-color.html blob-color-unbiased.png",
+    "test:surface": "node tests/browser.mjs surface-brush.html"
+  }
+}

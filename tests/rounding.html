@@ -1,0 +1,45 @@
+<!doctype html><canvas></canvas>
+<script type="module">
+  try {
+    const adapter = await navigator.gpu.requestAdapter(),
+      d = await adapter.requestDevice(),
+      module = d.createShaderModule({
+        code: "@group(0) @binding(0) var<storage,read_write> result:array<u32>;@compute @workgroup_size(1) fn main(){result[0]=pack2x16float(vec2<f32>(1.0007,1.0017));}",
+      }),
+      p = await d.createComputePipelineAsync({
+        layout: "auto",
+        compute: { module, entryPoint: "main" },
+      }),
+      b = d.createBuffer({
+        size: 4,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      }),
+      r = d.createBuffer({
+        size: 4,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      }),
+      g = d.createBindGroup({
+        layout: p.getBindGroupLayout(0),
+        entries: [{ binding: 0, resource: { buffer: b } }],
+      }),
+      e = d.createCommandEncoder(),
+      pass = e.beginComputePass();
+    pass.setPipeline(p);
+    pass.setBindGroup(0, g);
+    pass.dispatchWorkgroups(1);
+    pass.end();
+    e.copyBufferToBuffer(b, 0, r, 0, 4);
+    d.queue.submit([e.finish()]);
+    await r.mapAsync(GPUMapMode.READ);
+    const u = new Uint32Array(r.getMappedRange())[0];
+    window.testResult = {
+      ok: true,
+      low: u & 65535,
+      high: u >>> 16,
+      nearest: [15361, 15362],
+    };
+    d.destroy();
+  } catch (e) {
+    window.testResult = { ok: false, error: e.message };
+  }
+</script>

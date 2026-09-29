@@ -1,0 +1,264 @@
+// Generated layouts bind only resources actually used by a pass (<= 8 storage buffers).
+const types = `
+struct Layer { d:f32,p:f32,s:f32,id:u32 };
+struct Spec { a:array<u32,19>,beta:u32 };
+struct Bed { h:f32,r:array<u32,19> };
+struct WideSpec { a:array<vec2<f32>,19>,beta:f32 };
+struct Brush { d:f32,p:f32,beta:u32,a:array<u32,19> };
+struct Flux { d:f32,p:f32,sb:u32,a:array<u32,19> };
+struct Param { v:array<vec4<f32>,16> };
+struct Tiles { v:array<vec4<u32>,4096> };
+struct Stamp { pos:vec4<f32>, motion:vec4<f32>, paint:vec4<f32>, a:array<vec4<u32>,5>, step:vec4<f32> };
+@group(0) @binding(0) var<uniform> P:Param;
+@group(0) @binding(1) var<uniform> tiles:Tiles;
+@group(0) @binding(2) var<uniform> op:vec4<u32>;
+fn nx()->u32{return u32(P.v[0].x);} fn ny()->u32{return u32(P.v[0].y);}
+fn count()->u32{return nx()*ny();} fn dx()->f32{return P.v[0].z;} fn dt()->f32{return P.v[0].w;}
+fn eps()->f32{return P.v[2].y;} fn epsp()->f32{return eps()*.01;}
+fn ci(x:i32,y:i32)->u32{return u32(clamp(y,0,i32(ny())-1))*nx()+u32(clamp(x,0,i32(nx())-1));}
+fn fx(x:u32,y:u32)->u32{return y*(nx()+1u)+x;}
+fn fy(x:u32,y:u32)->u32{return (nx()+1u)*ny()+y*nx()+x;}
+// Explicit IEEE nearest-even: native pack2x16float may truncate on some backends.
+fn halfNearest(x:f32)->u32{let bits=bitcast<u32>(x);let sign=(bits>>16u)&32768u;let exponent=i32((bits>>23u)&255u)-112;let mantissa=bits&8388607u;if(exponent>=31){return sign|31743u;}if(exponent<=0){if(exponent< -10){return sign;}let f=mantissa|8388608u;let shift=u32(14-exponent);var q=f>>shift;let remainder=f&((1u<<shift)-1u);let mid=1u<<(shift-1u);if(remainder>mid||(remainder==mid&&(q&1u)!=0u)){q++;}return sign|q;}let rounded=bits+4095u+((bits>>13u)&1u);return sign|(((rounded>>13u)-0x1c000u)&32767u);}
+fn packNormal(v:vec2<f32>)->u32{let bits=bitcast<vec2<u32>>(v);let rounded=(bits+vec2<u32>(4095u)+((bits>>vec2<u32>(13u))&vec2<u32>(1u)))&vec2<u32>(0xffffe000u);return pack2x16float(bitcast<vec2<f32>>(rounded));}
+fn packNearest(v:vec2<f32>)->u32{let small=(abs(v)<vec2<f32>(0.00006103515625));if(any(small)&&any(v!=vec2<f32>(0))){if((v.x!=0&&small.x)||(v.y!=0&&small.y)){return halfNearest(v.x)|(halfNearest(v.y)<<16u);}}let bits=bitcast<vec2<u32>>(v);let rounded=(bits+vec2<u32>(4095u)+((bits>>vec2<u32>(13u))&vec2<u32>(1u)))&vec2<u32>(0xffffe000u);return pack2x16float(bitcast<vec2<f32>>(rounded));}
+fn pair(q:u32)->vec2<f32>{return unpack2x16float(q);}
+fn beta(q:Spec)->f32{return pair(q.beta).x;}
+fn mixspec(a:Spec,pa:f32,b:Spec,pb:f32)->Spec{var o:Spec;let p=pa+pb;if(p<=epsp()){return o;}for(var i=0u;i<19u;i++){o.a[i]=packNormal(max(vec2<f32>(0),(pair(a.a[i])*pa+pair(b.a[i])*pb)/p));}o.beta=packNormal(vec2<f32>((beta(a)*pa+beta(b)*pb)/p,0));return o;}
+fn wide(q:Spec)->WideSpec{var o:WideSpec;for(var j=0u;j<19u;j++){o.a[j]=pair(q.a[j]);}o.beta=beta(q);return o;}
+fn narrow(q:WideSpec)->Spec{var o:Spec;for(var j=0u;j<19u;j++){o.a[j]=packNormal(max(vec2<f32>(0),q.a[j]));}o.beta=packNormal(vec2<f32>(max(0,q.beta),0));return o;}
+fn mixwide(a:WideSpec,pa:f32,b:WideSpec,pb:f32)->WideSpec{var o:WideSpec;let p=pa+pb;if(p<=epsp()){return o;}for(var j=0u;j<19u;j++){o.a[j]=(a.a[j]*pa+b.a[j]*pb)/p;}o.beta=(a.beta*pa+b.beta*pb)/p;return o;}
+fn stepRate(rate:f32,scale:f32)->f32{if(scale==1){return rate;}return 1-pow(max(0,1-rate),scale);}
+fn over(a:f32,b:f32,p:f32,ground:f32)->f32{if(p<=0||b<=0){return ground;}let sx=P.v[4].x*b*p;let ak=1+a/(256*b);let bk=sqrt(max(0,ak*ak-1));let xi=bk*sx;var r:f32;var t:f32;if(xi<.001){r=sx/(1+ak*sx);t=(1-xi)/(1+ak*sx);}else{let e=exp(-2*xi);let den=max(ak*(1-e)+bk*(1+e),1e-30);r=(1-e)/den;t=2*bk*exp(-xi)/den;}return r+t*t*ground/max(1-r*ground,1e-30);}
+fn comp(x0:f32)->f32{let x=clamp(x0,0,1);if(x<=.0031308){return 12.92*x;}return 1.055*pow(x,1/2.4)-.055;}
+`;
+const declarations = {
+  bed: "array<Bed>",
+  surface: "array<f32>",
+  aux: "array<vec4<f32>>",
+  aux2: "array<vec4<f32>>",
+  vel: "array<f32>",
+  adv: "array<f32>",
+  pred: "array<f32>",
+  coef: "array<vec4<f32>>",
+  solve: "array<vec4<f32>>",
+  keep: "array<f32>",
+  mask: "array<vec4<f32>>",
+  brush: "array<Brush>",
+  flux: "array<Flux>",
+  fluxEpoch: "array<u32>",
+  limit: "array<f32>",
+  profile: "array<vec4<f32>>",
+  flags: "array<u32>",
+  list: "array<vec4<u32>>",
+  indirect: "array<u32>",
+};
+export function shaders(nl, tables) {
+  const L = Array.from({ length: nl }, (_, k) => "l" + k),
+    S = L.map((_, k) => "s" + k);
+  for (const k of L) declarations[k] = "array<Layer>";
+  for (const k of S) declarations[k] = "array<Spec>";
+  const readL = `fn layer(k:u32,i:u32)->Layer{switch k{${L.map((x, k) => `case ${k}u:{return ${x}[i];}`).join("")}default:{return l0[i];}}}`;
+  const writeL = `fn putlayer(k:u32,i:u32,v:Layer){switch k{${L.map((x, k) => `case ${k}u:{${x}[i]=v;}`).join("")}default:{}}}`;
+  const readS = `fn spectrum(k:u32,i:u32)->Spec{switch k{${S.map((x, k) => `case ${k}u:{return ${x}[i];}`).join("")}default:{return s0[i];}}}`;
+  const writeS = `fn putspec(k:u32,i:u32,v:Spec){switch k{${S.map((x, k) => `case ${k}u:{${x}[i]=v;}`).join("")}default:{}}}`;
+  const height = `fn height(i:u32)->f32{var h=bed[i].h;for(var k=0u;k<${nl}u;k++){h+=layer(k,i).d;}return h;}`;
+  const tileMain = (body) =>
+    `@compute @workgroup_size(8,8) fn main(@builtin(workgroup_id) wg:vec3<u32>,@builtin(local_invocation_id) l:vec3<u32>){let tile=tiles.v[wg.x/64u][(wg.x/16u)%4u];let sub=wg.x%16u;let x=(tile>>16u)*32u+(sub%4u)*8u+l.x;let y=(tile&65535u)*32u+(sub/4u)*8u+l.y;if(x>=nx()||y>=ny()){return;}let i=y*nx()+x;${body}}`;
+  const fullMain = (body) =>
+    `@compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) gid:vec3<u32>){let x=gid.x;let y=gid.y;if(x>=nx()||y>=ny()){return;}let i=y*nx()+x;${body}}`;
+  const faceMain = (body) =>
+    `fn face(x:u32,y:u32,axis:u32){let f=select(fx(x,y),fy(x,y),axis==1u);let boundary=select(x==0u||x==nx(),y==0u||y==ny(),axis==1u);var a=ci(i32(x),i32(y));var b=a;if(!boundary){b=y*nx()+x;a=select(b-1u,b-nx(),axis==1u);}${body}}` +
+    tileMain(
+      `face(x,y,0u);face(x,y,1u);if(x==nx()-1u){face(nx(),y,0u);}if(y==ny()-1u){face(x,ny(),1u);}`,
+    );
+  const make = (bindings, body, extra = "") => {
+    const source =
+      types +
+      bindings
+        .map(
+          ([name, mode], i) =>
+            `@group(1) @binding(${i}) var<storage,${mode ?? "read"}> ${name}:${declarations[name]};`,
+        )
+        .join("\n") +
+      extra +
+      body;
+    return { source, bindings: bindings.map((x) => x[0]) };
+  };
+  const ls = L.map((x) => [x]),
+    ss = S.map((x) => [x]),
+    lw = L.map((x) => [x, "read_write"]),
+    sw = S.map((x) => [x, "read_write"]);
+  const result = {};
+  result.init = make(
+    [["bed", "read_write"]],
+    fullMain(
+      "bed[i].h=0;for(var q=0u;q<19u;q++){bed[i].r[q]=packNormal(vec2<f32>(.995));}",
+    ),
+  );
+  result.aux = make(
+    [...ls, ["aux", "read_write"], ["aux2", "read_write"]],
+    tileMain(
+      `var d=0.;var p=0.;var sd=0.;for(var k=0u;k<${nl}u;k++){let q=layer(k,i);d+=q.d;p+=q.p;sd+=q.s*q.d;}var phi=0.;var dry=0.;if(d>eps()){phi=p/d;dry=sd/d;}let effective=phi+dry*(1-phi);let t=clamp((effective-P.v[3].x)/(P.v[3].y-P.v[3].x),0,1);let stiffness=t*t*(3-2*t);var wet=select(0.,1.,d>=P.v[2].w);var nu=mix(P.v[3].z,P.v[3].w,t);if(P.v[9].x==0){wet=smoothstep(.5*P.v[2].w,1.5*P.v[2].w,d);nu=exp(mix(log(P.v[3].z),log(P.v[3].w),t));}let factor=wet*(1-stiffness);aux[i]=vec4<f32>(d,nu,factor*max(P.v[1].z,P.v[1].w),stiffness);aux2[i]=vec4<f32>(factor*P.v[1].xy,wet,effective);`,
+    ),
+    readL,
+  );
+  result.coef = make(
+    [["aux"], ["coef", "read_write"]],
+    faceMain(
+      `if(boundary){var q=vec4<f32>(0);if(P.v[9].x==0){let h=aux[a].x;let friction=1/(1+3*aux[a].y*dt()/pow(max(h,eps()),2));q=vec4<f32>(0,0,h,friction);}coef[f]=q;return;}let q=(aux[a]+aux[b])*.5;let friction=1/(1+3*q.y*dt()/pow(max(q.x,eps()),2));let gf=q.z*friction;coef[f]=vec4<f32>(pow(dt()/dx(),2)*gf*q.x,gf,q.x,friction);`,
+    ),
+  );
+  const sample = `fn samplevel(pos:vec2<f32>,axis:u32)->f32{let dims=vec2<u32>(nx()+select(1u,0u,axis==1u),ny()+select(0u,1u,axis==1u));let p=clamp(pos,vec2<f32>(0),vec2<f32>(dims-vec2<u32>(1)));let lo=vec2<u32>(floor(p));let hi=min(lo+vec2<u32>(1),dims-vec2<u32>(1));let f=fract(p);let offset=select(0u,(nx()+1u)*ny(),axis==1u);let aa=vel[offset+lo.y*dims.x+lo.x];let bb=vel[offset+lo.y*dims.x+hi.x];let cc=vel[offset+hi.y*dims.x+lo.x];let dd=vel[offset+hi.y*dims.x+hi.x];return mix(mix(aa,bb,f.x),mix(cc,dd,f.x),f.y);}`;
+  result.advect = make(
+    [["vel"], ["aux2"], ["adv", "read_write"]],
+    faceMain(
+      `if(boundary){adv[f]=0;if(P.v[9].x==0){adv[f]=vel[f]+dt()*aux2[a][axis];}return;}var cross:f32;if(axis==0u){cross=.25*(vel[fy(x-1u,y)]+vel[fy(x,y)]+vel[fy(x-1u,y+1u)]+vel[fy(x,y+1u)]);}else{cross=.25*(vel[fx(x,y-1u)]+vel[fx(x+1u,y-1u)]+vel[fx(x,y)]+vel[fx(x+1u,y)]);}let flow=select(vec2<f32>(vel[f],cross),vec2<f32>(cross,vel[f]),axis==1u);let grav=.5*(aux2[a][axis]+aux2[b][axis]);adv[f]=samplevel(vec2<f32>(f32(x),f32(y))-flow*dt()/dx(),axis)+dt()*grav;`,
+    ),
+    sample,
+  );
+  result.visc = make(
+    [["adv"], ["aux"], ["coef"], ["pred", "read_write"]],
+    faceMain(
+      `if(boundary){pred[f]=0;if(P.v[9].x==0){let outward=select(-1.,1.,select(x>0u,y>0u,axis==1u));pred[f]=outward*max(0.,outward*adv[f])*coef[f].w;}return;}let width=nx()+select(1u,0u,axis==1u);let hh=ny()+select(0u,1u,axis==1u);let offset=select(0u,(nx()+1u)*ny(),axis==1u);let left=offset+y*width+u32(max(i32(x)-1,0));let right=offset+y*width+min(x+1u,width-1u);let down=offset+u32(max(i32(y)-1,0))*width+x;let up=offset+min(y+1u,hh-1u)*width+x;let mean=.25*(adv[left]+adv[right]+adv[down]+adv[up]);let nu=.5*(aux[a].y+aux[b].y);pred[f]=(mean+(adv[f]-mean)*exp(-4*nu*dt()/(dx()*dx())))*coef[f].w;`,
+    ),
+  );
+  result.solveInit = make(
+    [["bed"], ["aux"], ["coef"], ["pred"], ["solve", "read_write"]],
+    tileMain(
+      `let w=fx(x,y);let e=fx(x+1u,y);let s=fy(x,y);let n=fy(x,y+1u);let eta=bed[i].h+aux[i].x;let rhs=eta-dt()/dx()*(coef[e].z*pred[e]-coef[w].z*pred[w]+coef[n].z*pred[n]-coef[s].z*pred[s]);solve[i]=vec4<f32>(eta,rhs,1+coef[w].x+coef[e].x+coef[s].x+coef[n].x,0);`,
+    ),
+  );
+  result.gs = make(
+    [["coef"], ["solve", "read_write"]],
+    tileMain(
+      `if((x+y)%2u!=op.z){return;}var sum=0.;if(x>0u){sum+=coef[fx(x,y)].x*solve[i-1u].x;}if(x+1u<nx()){sum+=coef[fx(x+1u,y)].x*solve[i+1u].x;}if(y>0u){sum+=coef[fy(x,y)].x*solve[i-nx()].x;}if(y+1u<ny()){sum+=coef[fy(x,y+1u)].x*solve[i+nx()].x;}solve[i].x=(solve[i].y+sum)/solve[i].z;`,
+    ),
+  );
+  result.correct = make(
+    [["solve"], ["coef"], ["pred"], ["mask"], ["vel", "read_write"]],
+    faceMain(
+      `if(boundary&&P.v[9].x>0){vel[f]=0;return;}let q=pred[f]-dt()/dx()*coef[f].y*(solve[b].x-solve[a].x);let m=.5*(mask[a].x+mask[b].x);let mv=.5*(mask[a][axis+1u]+mask[b][axis+1u]);vel[f]=(1-m)*q+mv/1.5;if(boundary){let outward=select(-1.,1.,select(x>0u,y>0u,axis==1u));vel[f]=outward*max(0.,outward*vel[f]);}`,
+    ),
+  );
+  result.keep = make(
+    [["vel"], ["keep", "read_write"]],
+    tileMain(
+      `let u=.5*(vel[fx(x,y)]+vel[fx(x+1u,y)]);let v=.5*(vel[fy(x,y)]+vel[fy(x,y+1u)]);let speed=length(vec2<f32>(u,v));var mobility=select(0.,1.,speed>=P.v[2].z);if(P.v[9].x==0){mobility=smoothstep(.5*P.v[2].z,1.5*P.v[2].z,speed);}keep[i]=mobility;`,
+    ),
+  );
+  result.clamp = make(
+    [["aux"], ["keep"], ["vel", "read_write"]],
+    faceMain(
+      `if(boundary&&P.v[9].x>0){vel[f]=0;return;}if(max(keep[a],keep[b])==0||max(aux[a].x,aux[b].x)<eps()){vel[f]=0;}else{vel[f]=clamp(vel[f]*max(keep[a],keep[b]),-P.v[4].y,P.v[4].y);}`,
+    ),
+  );
+  // Freeze all layer profile factors before serial layer apply, preserving the reference simultaneous sweep.
+  result.profile = make(
+    [...ls, ["profile", "read_write"]],
+    tileMain(
+      `var d=0.;for(var k=0u;k<${nl}u;k++){d+=layer(k,i).d;}var z=0.;var q=vec4<f32>(0);if(d>0){for(var k=0u;k<${nl}u;k++){let h=layer(k,i).d;let lo=z/d;let hi=(z+h)/d;if(h>0){q[k]=1.5*(lo+hi)-.5*(lo*lo+lo*hi+hi*hi);}z+=h;}}profile[i]=q;`,
+    ),
+    readL,
+  );
+  result.flux = [];
+  result.limiter = [];
+  result.apply = [];
+  for (let k = 0; k < nl; k++) {
+    result.flux[k] = make(
+      [
+        [L[k]],
+        [S[k]],
+        ["vel"],
+        ["profile"],
+        ["flux", "read_write"],
+        ["fluxEpoch", "read_write"],
+      ],
+      faceMain(
+        `if(axis!=op.x){return;}let idx=select(f,f-(nx()+1u)*ny(),axis==1u);fluxEpoch[idx]=u32(P.v[8].z)*32u+op.w*6u+op.x*3u+${k}u;var o:Flux;if((boundary&&P.v[9].x>0)||vel[f]==0){flux[idx]=o;return;}let donor=select(b,a,vel[f]>0);let q=${L[k]}[donor];let sp=${S[k]}[donor];o.d=q.d*profile[donor][${k}]*vel[f]*dt()/(P.v[4].z*dx());o.p=o.d*q.p/max(q.d,1e-30);o.sb=(sp.beta&65535u)<<16u;if(q.s!=0){o.sb|=halfNearest(q.s);}o.a=sp.a;flux[idx]=o;`,
+      ),
+    );
+    result.limiter[k] = make(
+      [[L[k]], ["flux"], ["fluxEpoch"], ["limit", "read_write"]],
+      tileMain(
+        `let a=select(fx(x,y),y*nx()+x,op.x==1u);let b=a+select(1u,nx(),op.x==1u);let epoch=u32(P.v[8].z)*32u+op.w*6u+op.x*3u+${k}u;let ad=select(0.,flux[a].d,fluxEpoch[a]==epoch);let bd=select(0.,flux[b].d,fluxEpoch[b]==epoch);let out=max(0,bd)-min(0,ad);limit[i]=min(1,${L[k]}[i].d/max(out,1e-30));`,
+      ),
+    );
+    result.apply[k] = make(
+      [
+        [L[k], "read_write"],
+        [S[k], "read_write"],
+        ["flux"],
+        ["fluxEpoch"],
+        ["limit"],
+      ],
+      tileMain(
+        `let axis=op.x;let a=select(fx(x,y),y*nx()+x,axis==1u);let b=a+select(1u,nx(),axis==1u);let epoch=u32(P.v[8].z)*32u+op.w*6u+op.x*3u+${k}u;var fa:Flux;var fb:Flux;if(fluxEpoch[a]==epoch){fa=flux[a];}if(fluxEpoch[b]==epoch){fb=flux[b];}let step=select(1u,nx(),axis==1u);let coord=select(x,y,axis==1u);let dim=select(nx(),ny(),axis==1u);var ka=select(0.,limit[i],coord==0u&&fa.d<0);var kb=select(0.,limit[i],coord+1u==dim&&fb.d>0);if(coord>0u){ka=limit[select(i,i-step,fa.d>0)];}if(coord+1u<dim){kb=limit[select(i+step,i,fb.d>0)];}let ad=fa.d*ka;let bd=fb.d*kb;let ap=fa.p*ka;let bp=fb.p*kb;let q=${L[k]}[i];let sp=${S[k]}[i];let d=max(0,q.d+ad-bd);let p=clamp(q.p+ap-bp,0,d);var dry=0.;if(d>eps()){dry=clamp((q.s*q.d+pair(fa.sb).x*ad-pair(fb.sb).x*bd)/d,0,1);}${L[k]}[i]=Layer(d,p,dry,q.id);if(ap==0&&bp==0&&p==q.p){return;}var ns:Spec;if(p>epsp()){for(var j=0u;j<19u;j++){if((ap==0||sp.a[j]==fa.a[j])&&(bp==0||sp.a[j]==fb.a[j])){ns.a[j]=sp.a[j];}else{ns.a[j]=packNormal(max(vec2<f32>(0),(pair(sp.a[j])*q.p+pair(fa.a[j])*ap-pair(fb.a[j])*bp)/p));}}ns.beta=packNormal(vec2<f32>(max(0,(beta(sp)*q.p+pair(fa.sb).y*ap-pair(fb.sb).y*bp)/p),0));}${L[k]}[i]=Layer(d,p,dry,q.id);${S[k]}[i]=ns;`,
+      ),
+    );
+  }
+  const brushExtra =
+    readL +
+    writeL +
+    readS +
+    writeS +
+    `@group(2) @binding(0) var<uniform> stamp:Stamp;fn brushspec(b:Brush)->Spec{var s:Spec;s.a=b.a;s.beta=b.beta;return s;}`;
+  result.brush = make(
+    [...lw, ...sw, ["brush", "read_write"], ["mask", "read_write"]],
+    `@compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) gid:vec3<u32>){let r=i32(ceil(stamp.pos.z));let side=u32(2*r+1);if(gid.x>=side||gid.y>=side){return;}let bi=gid.y*side+gid.x;if(stamp.paint.y>0){var initial:Brush;initial.d=select(P.v[5].w,0.,stamp.paint.z>0);initial.p=initial.d*stamp.motion.z;initial.beta=packNormal(vec2<f32>(stamp.paint.x,0));for(var j=0u;j<19u;j++){initial.a[j]=stamp.a[j/4u][j%4u];}brush[bi]=initial;}let bx=i32(gid.x)-r;let by=i32(gid.y)-r;let xx=i32(round(stamp.pos.x-.5))+bx;let yy=i32(round(stamp.pos.y-.5))+by;if(xx<0||yy<0||xx>=i32(nx())||yy>=i32(ny())){return;}let offset=vec2<f32>(f32(xx)+.5-stamp.pos.x,f32(yy)+.5-stamp.pos.y);let distance2=dot(offset,offset);if(distance2>=stamp.pos.z*stamp.pos.z){return;}let rho=sqrt(distance2)/stamp.pos.z;let reference=P.v[9].x>0;let smudge=stamp.paint.z>0;let scale=stamp.step.x;let depositRate=stepRate(P.v[5].x,scale);let pickupRate=stepRate(select(P.v[9].y,P.v[5].y,reference||smudge),scale);let mixingRate=stepRate(P.v[5].z,scale);let drag=select(P.v[9].z,1.,reference||smudge);var coverage=clamp((1-rho)/.2,0,1);if(!reference){coverage=coverage*coverage*(3-2*coverage);}let m=coverage*stamp.pos.w;if(m<=0){return;}let i=u32(yy)*nx()+u32(xx);var paint:WideSpec;for(var j=0u;j<19u;j++){paint.a[j]=pair(stamp.a[j/4u][j%4u]);}paint.beta=stamp.paint.x;var b=brush[bi];var bWide=wide(brushspec(b));var q:array<Layer,${nl}>;var sp:array<WideSpec,${nl}>;var n=0u;var total=0.;for(var k=0u;k<${nl}u;k++){let v=layer(k,i);q[k]=v;sp[k]=wide(spectrum(k,i));if(v.d>=eps()){n++;}}for(var sweep=0u;sweep<${nl}u;sweep++){for(var k=0u;k+1u<${nl}u;k++){if(q[k].d<eps()&&q[k+1u].d>=eps()){let temp=q[k];q[k]=q[k+1u];q[k+1u]=temp;let tempSpec=sp[k];sp[k]=sp[k+1u];sp[k+1u]=tempSpec;}}}for(var k=0u;k<n;k++){total+=q[k].d;}var z=total;for(var kk=i32(n)-2;kk>=0;kk--){let k=u32(kk);z-=q[k+1u].d;if(z>(1-stamp.pos.w)*total){let a=q[k];let c=q[k+1u];let aspec=sp[k];let cs=sp[k+1u];let exchange=mixingRate*m*(1-max(a.s,c.s))*min(a.d,c.d);let pa=exchange*a.p/max(a.d,1e-30);let pc=exchange*c.p/max(c.d,1e-30);sp[k]=mixwide(aspec,a.p-pa,cs,pc);sp[k+1u]=mixwide(cs,c.p-pc,aspec,pa);q[k].p=a.p-pa+pc;q[k+1u].p=c.p-pc+pa;q[k].s=(a.s*(a.d-exchange)+c.s*exchange)/max(a.d,1e-30);q[k+1u].s=(c.s*(c.d-exchange)+a.s*exchange)/max(c.d,1e-30);}}if(n>0u){let k=n-1u;let pick=min(pickupRate*m*(1-q[k].s)*q[k].d,max(0,P.v[5].w-b.d));let pigment=pick*q[k].p/max(q[k].d,1e-30);bWide=mixwide(bWide,b.p,sp[k],pigment);b.d+=pick;b.p+=pigment;q[k].d-=pick;q[k].p-=pigment;total-=pick;if(q[k].d<eps()){n--;total-=q[k].d;}}var dep=max(0,min(depositRate*m*b.d,b.d));if(reference){dep=min(dep,max(0,P.v[2].x-total));}if(dep>0){var dest=0u;let id=bitcast<u32>(stamp.motion.w);if(n>0u&&(!reference||q[n-1u].id==id)){dest=n-1u;}else if(n<${nl}u){dest=n;n++;}else{let a=q[0];let c=q[1];sp[0]=mixwide(sp[0],a.p,sp[1],c.p);q[0]=Layer(a.d+c.d,a.p+c.p,(a.s*a.d+c.s*c.d)/max(a.d+c.d,1e-30),c.id);for(var k=1u;k<${nl - 1}u;k++){q[k]=q[k+1u];sp[k]=sp[k+1u];}dest=${nl - 1}u;var empty:Layer;var emptySpec:WideSpec;q[dest]=empty;sp[dest]=emptySpec;}let pigment=dep*b.p/max(b.d,1e-30);sp[dest]=mixwide(sp[dest],q[dest].p,bWide,pigment);q[dest].s=q[dest].s*q[dest].d/max(q[dest].d+dep,1e-30);q[dest].d+=dep;q[dest].p+=pigment;q[dest].id=id;b.d-=dep;b.p-=pigment;}let refill=stepRate(stamp.paint.w,scale)*max(0,P.v[5].w-b.d);bWide=mixwide(bWide,b.p,paint,refill*stamp.motion.z);b.d+=refill;b.p+=refill*stamp.motion.z;let packed=narrow(bWide);b.a=packed.a;b.beta=packed.beta;brush[bi]=b;for(var k=0u;k<${nl}u;k++){q[k].p=clamp(q[k].p,0,q[k].d);putlayer(k,i,q[k]);putspec(k,i,narrow(sp[k]));}mask[i]=vec4<f32>(m*drag,m*drag*stamp.motion.xy,1);}`,
+    brushExtra,
+  );
+  result.dry = make(
+    [...lw, ...sw, ["bed", "read_write"]],
+    fullMain(
+      `var q:array<Layer,${nl}>;var sp:array<Spec,${nl}>;var n=0u;for(var k=0u;k<${nl}u;k++){var v=layer(k,i);if(v.d>0){v.s=min(1,v.s+P.v[6].x*dt());if(op.w==1u){v.s=1;}q[n]=v;sp[n]=spectrum(k,i);n++;}}var ground=bed[i];var baked=0u;for(var k=0u;k<n;k++){if(q[k].s<1){break;}for(var j=0u;j<19u;j++){let a=pair(sp[k].a[j]);let r=pair(ground.r[j]);let b=beta(sp[k]);ground.r[j]=packNormal(vec2<f32>(over(a.x,b,q[k].p,r.x),over(a.y,b,q[k].p,r.y)));}ground.h+=q[k].d;baked++;}bed[i]=ground;for(var k=0u;k<${nl}u;k++){var v:Layer;var s:Spec;if(k+baked<n){v=q[k+baked];s=sp[k+baked];}putlayer(k,i,v);putspec(k,i,s);}`,
+    ),
+    readL + writeL + readS + writeS,
+  );
+  result.scan = make(
+    [...ls, ["vel"], ["mask"], ["flags", "read_write"]],
+    `var<workgroup> tileFlag:atomic<u32>;@compute @workgroup_size(256) fn main(@builtin(workgroup_id) wg:vec3<u32>,@builtin(local_invocation_index) local:u32){let tw=(nx()+31u)/32u;let tx=wg.x%tw;let ty=wg.x/tw;if(local==0u){atomicStore(&tileFlag,0u);}workgroupBarrier();var flag=0u;for(var z=local;z<1024u;z+=256u){let xx=tx*32u+z%32u;let yy=ty*32u+z/32u;if(xx<nx()&&yy<ny()){let i=yy*nx()+xx;for(var k=0u;k<${nl}u;k++){if(layer(k,i).d>=eps()){flag|=1u;}}if(mask[i].w>0){flag|=2u;}if(vel[fx(xx,yy)]!=0||vel[fx(xx+1u,yy)]!=0||vel[fy(xx,yy)]!=0||vel[fy(xx,yy+1u)]!=0){flag|=4u;}}}atomicOr(&tileFlag,flag);workgroupBarrier();if(local==0u){flags[wg.x]=atomicLoad(&tileFlag);}}`,
+    readL,
+  );
+  result.compact = make(
+    [["flags"], ["list", "read_write"], ["indirect", "read_write"]],
+    `@compute @workgroup_size(1) fn main(){let tw=(nx()+31u)/32u;let th=(ny()+31u)/32u;var n=0u;for(var y=0u;y<th;y++){for(var x=0u;x<tw;x++){var isActive=false;for(var oy=-1;oy<=1;oy++){for(var ox=-1;ox<=1;ox++){let xx=i32(x)+ox;let yy=i32(y)+oy;if(xx>=0&&yy>=0&&xx<i32(tw)&&yy<i32(th)){let f=flags[u32(yy)*tw+u32(xx)];if((f&select(7u,4u,op.w==2u))!=0u){isActive=true;}}}}if(isActive){list[n/4u][n%4u]=(x<<16u)|y;n++;}}}indirect[0]=n*16u;indirect[1]=1u;indirect[2]=1u;}`,
+  );
+  const cmf = tables.cmf.map(
+    (row) =>
+      "array<f32,38>(" +
+      row.map((x) => Number(x).toExponential(12)).join(",") +
+      ")",
+  );
+  // Filter only the height used for lighting. Physical depth and pigment stay untouched.
+  result.surface = make(
+    [...ls, ["bed"], ["surface", "read_write"]],
+    fullMain(
+      `let radius=i32(P.v[8].w);var h=0.;for(var ox=-radius;ox<=radius;ox++){h+=height(ci(i32(x)+ox,i32(y)));}surface[i]=h/f32(2*radius+1);`,
+    ),
+    readL + height,
+  );
+  const smoothHeight = `fn height(i:u32)->f32{let radius=i32(P.v[8].w);let x=i32(i%nx());let y=i32(i/nx());var h=0.;for(var oy=-radius;oy<=radius;oy++){h+=surface[ci(x,y+oy)];}return h/f32(2*radius+1);}`;
+  const renderExtra =
+    readL +
+    readS +
+    smoothHeight +
+    `@group(2) @binding(0) var output:texture_storage_2d<rgba8unorm,write>;const CX=${cmf[0]};const CY=${cmf[1]};const CZ=${cmf[2]};fn g1(n:f32,a:f32)->f32{return 2*n/max(n+sqrt(a*a+(1-a*a)*n*n),1e-8);}`;
+  const matrix = tables.xyz_to_rgb.map(
+    (row) => "vec3<f32>(" + row.join(",") + ")",
+  );
+  result.render = make(
+    [...ls, ...ss, ["bed"], ["surface"]],
+    fullMain(
+      `var xyz=vec3<f32>(0);for(var j=0u;j<19u;j++){var r=pair(bed[i].r[j]);for(var k=0u;k<${nl}u;k++){let q=layer(k,i);if(q.p>0){let sp=spectrum(k,i);let a=pair(sp.a[j]);r=vec2<f32>(over(a.x,beta(sp),q.p,r.x),over(a.y,beta(sp),q.p,r.y));}}let a=2u*j;xyz+=vec3<f32>(CX[a],CY[a],CZ[a])*r.x+vec3<f32>(CX[a+1u],CY[a+1u],CZ[a+1u])*r.y;}var color=clamp(vec3<f32>(dot(${matrix[0]},xyz),dot(${matrix[1]},xyz),dot(${matrix[2]},xyz)),vec3<f32>(0),vec3<f32>(1));if(P.v[7].w>0){let ddx=(height(ci(i32(x)+1,i32(y)))-height(ci(i32(x)-1,i32(y))))/(dx()*select(2.,1.,x==0u||x==nx()-1u));let ddy=(height(ci(i32(x),i32(y)+1))-height(ci(i32(x),i32(y)-1)))/(dx()*select(2.,1.,y==0u||y==ny()-1u));let normal=normalize(vec3<f32>(-P.v[7].x*ddx,-P.v[7].x*ddy,1));let light=normalize(vec3<f32>(-.4,.5,.77));let halfv=normalize(light+vec3<f32>(0,0,1));var rough=P.v[6].w;for(var k=0u;k<${nl}u;k++){let q=layer(k,i);if(q.d>eps()){rough=mix(P.v[6].y,P.v[6].z,q.s);}}let nl0=max(0,dot(normal,light));let nv=max(0,normal.z);let nh=max(0,dot(normal,halfv));let a2=rough*rough;let D=a2/(3.14159265*pow(nh*nh*(a2-1)+1,2));let F=P.v[8].x+(1-P.v[8].x)*pow(1-halfv.z,5);let specular=D*F*g1(nl0,rough)*g1(nv,rough)/max(4*nl0*nv,1e-8)*nl0;color=color*(P.v[7].y+P.v[7].z*nl0)+vec3<f32>(specular);}textureStore(output,vec2<i32>(i32(x),i32(y)),vec4<f32>(comp(color.x),comp(color.y),comp(color.z),1));`,
+    ),
+    renderExtra,
+  );
+  result.clearMask = make(
+    [["mask", "read_write"]],
+    tileMain("mask[i]=vec4<f32>(0);"),
+  );
+  return result;
+}
+export const commonWGSL = types;
+export const displayShader = `@group(0) @binding(0) var tex:texture_2d<f32>;@group(0) @binding(1) var smp:sampler;struct V{@builtin(position) p:vec4<f32>,@location(0) uv:vec2<f32>};@vertex fn vs(@builtin(vertex_index) i:u32)->V{var p=array<vec2<f32>,3>(vec2<f32>(-1,-1),vec2<f32>(3,-1),vec2<f32>(-1,3));var v:V;v.p=vec4<f32>(p[i],0,1);v.uv=p[i]*vec2<f32>(.5,-.5)+vec2<f32>(.5);return v;}@fragment fn fs(v:V)->@location(0) vec4<f32>{return textureSample(tex,smp,v.uv);}`;

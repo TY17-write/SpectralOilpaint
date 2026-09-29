@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>油彩アトリエ — Spectral Oilpaint</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <aside><div class="toolbar"><select id="theme" aria-label="表示テーマ"><option value="dark">ダーク</option><option value="light">ライト</option></select><button id="export">画像を保存</button></div>
+        <section>
+          <h2>絵具</h2>
+          <div class="colorrow">
+            <input
+              id="color"
+              type="color"
+              value="#c83228"
+              aria-label="絵具の色"
+            />
+            <div>
+              <strong id="hex">#C83228</strong><small>選んだ色を自動登録</small>
+            </div>
+          </div>
+          <div id="swatches"></div>
+          <div class="tools">
+            <button id="paint" class="selected">描く</button
+            ><button id="smudge">混ぜる</button>
+          </div>
+        </section>
+        <section>
+          <h2>筆の設定</h2>
+          <label
+            >筆の半径 <output id="radiusOut">18 px</output
+            ><input
+              id="radius"
+              type="range"
+              min="2"
+              max="128"
+              value="18" /></label
+          ><label
+            >顔料の濃さ <output id="phiOut">100%</output
+            ><input id="phi" type="range" min="2" max="100" value="100"
+          /></label>
+          <div class="rangehint">
+            <span>薄く透ける</span><span>チューブ絵具</span>
+          </div>
+          <label class="check"
+            ><input
+              id="refill"
+              type="checkbox"
+              checked
+            />絵具を自動で補充</label
+          >
+          <p class="hint">濃さを下げると下地が透けます。弱い筆圧では表面を、強い筆圧では少し深く拾います。混ぜずに重ねたいときは、下地を乾かしてください。</p>
+        </section>
+        <section>
+          <h2>キャンバス</h2>
+          <label
+            >左右の傾き <output id="tiltXOut">0°</output
+            ><input
+              id="tiltX"
+              type="range"
+              min="-60"
+              max="60"
+              value="0" /></label
+          ><label
+            >上下の傾き <output id="tiltYOut">10°</output
+            ><input
+              id="tiltY"
+              type="range"
+              min="-60"
+              max="60"
+              value="10" /></label
+          ><label
+            >乾燥時間<select id="dryTime">
+              <option value="Infinity">手動で乾燥</option>
+              <option value="300">5 分</option>
+              <option value="60">1 分</option>
+              <option value="10">10 秒（確認用）</option>
+            </select></label
+          ><button id="dry" class="wide">今すぐ乾かす</button
+          ><label class="check"
+            ><input
+              id="shading"
+              type="checkbox"
+            />絵具の凹凸と光沢を表示</label
+          ><label class="check"
+            ><input
+              id="pauseFluid"
+              type="checkbox"
+            />描いている間は流れを止める</label
+          >
+        </section>
+        <section>
+          <h2>新しいキャンバスの設定</h2><div class="pair"><label>比率<select id="format"><option value="4:3">4 : 3</option><option value="F">F（10号）</option><option value="P">P（10号）</option><option value="M">M（10号）</option><option value="S">S（正方形）</option></select></label><label>向き<select id="orientation"><option value="landscape">横位置</option><option value="portrait">縦位置</option></select></label></div>
+          <label
+            >解像度<select id="resolution">
+              <option value="512">長辺 512 px · 軽量</option>
+              <option value="1024" selected>長辺 1024 px · 標準</option>
+              <option value="2048">長辺 2048 px · 高精細</option>
+            </select></label
+          ><label
+            >湿潤層<select id="layers">
+              <option value="2">2 層</option>
+              <option value="3">3 層</option>
+            </select></label
+          ><p id="nextSize" class="hint"></p><button id="restart" class="wide">新しいキャンバス</button>
+          <p class="hint">
+            新しいキャンバスにすると現在の絵は消えます。必要な画像は先に保存してください。
+          </p>
+        </section>
+      </aside>
+      <div class="studio">
+        <div class="canvashead">
+          <span id="dimensions">1024 × 768</span>
+        </div>
+        <div id="canvasstage"><div class="canvaswrap">
+          <canvas id="canvas" aria-label="油彩キャンバス"></canvas>
+          <div id="overlay">絵具とキャンバスを準備しています…</div>
+          <div id="cursor"></div>
+        </div>
+        </div><div class="canvasfoot">
+          <span>色を重ね、筆で混ぜる。薄い絵具は傾きに沿って流れます。</span
+          ><span id="stats">準備中</span>
+        </div>
+        <p id="status" role="status">WebGPU を初期化しています。</p>
+      </div>
+    </main>
+    <script type="module" src="src/app.js"></script>
+  </body>
+</html>

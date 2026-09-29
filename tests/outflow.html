@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><canvas></canvas><pre>Running</pre><script type="module">
+import {OilEngine} from '../src/engine.js';
+try {
+const tables=await fetch('../reference/tables.json').then(r=>r.json()),logs=[];
+for(const setting of [{name:'bottom',tiltY:15},{name:'top',tiltY:-15},{name:'right',tiltX:15},{name:'left',tiltX:-15},{name:'corner / 3 layers',tiltX:15,tiltY:15,nl:3},{name:'stationary',phi:1,tiltY:15},{name:'dry',dry:true,tiltY:15}]){
+const e=await OilEngine.create(document.querySelector('canvas'),tables,{nx:64,ny:64,nl:2,width:64*.5/1024,shading:false,...setting});
+try {
+const n=64*64,phi=setting.phi??.35,depth=.003;for(let k=0;k<e.config.nl;k++){const a=new Float32Array(n*4);for(let i=0;i<n;i++){a[i*4]=depth/e.config.nl;a[i*4+1]=a[i*4]*phi;a[i*4+2]=setting.dry?1:0;}e.device.queue.writeBuffer(e.buffers['l'+k],0,a);}
+const measure=async()=>{let d=0,p=0,max=0;const height=new Float32Array(n);for(let k=0;k<e.config.nl;k++){const a=new Float32Array(await e.read('l'+k));for(let i=0;i<n;i++){if(!Number.isFinite(a[i*4])||a[i*4]<0||a[i*4+1]<0)throw Error('Invalid state');d+=a[i*4];p+=a[i*4+1];height[i]+=a[i*4];}}for(const h of height)max=Math.max(max,h);const bed=new Float32Array(await e.read('bed'));let baked=0;for(let i=0;i<n;i++)baked+=bed[i*20];return {d,p,max,baked};};
+const before=await measure();let previous=before.d;for(let j=0;j<600;j++){e.step({present:false});if(j%60===59){await e.device.queue.onSubmittedWorkDone();const q=await measure();if(q.d>previous+1e-5)throw Error('Boundary created paint');previous=q.d;}}
+const after=await measure(),remaining=after.d/before.d;
+if(setting.dry){if(Math.abs(after.d+after.baked-before.d)/before.d>1e-5)throw Error('Dry paint removed');}
+else if(setting.phi===1){if(Math.abs(remaining-1)>1e-6)throw Error('Stationary paint removed');}
+else {if(remaining>.95||remaining<=0)throw Error('No outflow '+remaining);if(after.max>depth*1.05)throw Error('Paint piled up '+after.max);if(Math.abs(after.p/after.d-phi)>1e-5)throw Error('Pigment fraction changed');}
+if(e.errors.length)throw Error(e.errors.join('\n'));logs.push({name:setting.name,remainingFraction:remaining,maxDepth:after.max});
+}finally{e.destroy();}}
+window.testResult={ok:true,logs};
+}catch(e){window.testResult={ok:false,error:e.stack};}document.querySelector('pre').textContent=JSON.stringify(window.testResult);
+</script>

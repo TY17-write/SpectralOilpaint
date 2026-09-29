@@ -1,0 +1,68 @@
+<!doctype html><meta charset="utf-8" /><title>GPU performance</title
+><canvas></canvas>
+<pre>Running</pre>
+<script type="module">
+  import { OilEngine } from "../src/engine.js";
+  import { paint, pack } from "../src/color.js";
+  import { colorGPU } from "./color-gpu.js";
+  try {
+    const tables = await fetch("../reference/tables.json").then((r) =>
+      r.json(),
+    );
+    const e = await OilEngine.create(document.querySelector("canvas"), tables);
+    const c = e.config,
+      N = c.nx * c.ny,
+      logs = [await colorGPU(e, tables)];
+    for (let k = 0; k < c.nl; k++) {
+      const a = new ArrayBuffer(N * 16),
+        f = new Float32Array(a),
+        u = new Uint32Array(a);
+      for (let i = 0; i < N; i++) {
+        f[i * 4] = 0.0005;
+        f[i * 4 + 1] = 0.00005;
+        u[i * 4 + 3] = 1;
+      }
+      e.device.queue.writeBuffer(e.buffers["l" + k], 0, a);
+      const p = paint([150, 50, 30], tables),
+        s = new Uint32Array(N * 20);
+      for (let i = 0; i < N; i++) {
+        for (let j = 0; j < 19; j++)
+          s[i * 20 + j] = pack(p.a[2 * j], p.a[2 * j + 1]);
+        s[i * 20 + 19] = pack(p.beta, 0);
+      }
+      e.device.queue.writeBuffer(e.buffers["s" + k], 0, s);
+    }
+    e.config.tiltX = 30;
+    for (let i = 0; i < 5; i++) {
+      e.step();
+      await e.device.queue.onSubmittedWorkDone();
+    }
+    const start = performance.now();
+    for (let i = 0; i < 30; i++) {
+      e.step();
+      await e.device.queue.onSubmittedWorkDone();
+    }
+    const ms = (performance.now() - start) / 30;
+    logs.push({
+      id: "T-P1",
+      resolution: [c.nx, c.ny],
+      layers: c.nl,
+      fullActive: true,
+      meanFrameMS: ms,
+      fps: 1000 / ms,
+      pass: 1000 / ms >= 45,
+      adapter: Object.fromEntries(
+        ["vendor", "architecture", "device", "description"].map((k) => [
+          k,
+          e.device.adapterInfo[k],
+        ]),
+      ),
+    });
+    if (e.errors.length) throw Error(e.errors.join("\n"));
+    window.testResult = { ok: 1000 / ms >= 45, logs };
+    e.destroy();
+  } catch (e) {
+    window.testResult = { ok: false, error: e.stack || e.message };
+  }
+  document.querySelector("pre").textContent = JSON.stringify(window.testResult);
+</script>

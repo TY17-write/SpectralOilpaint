@@ -1,0 +1,92 @@
+<!doctype html><meta charset="utf-8" /><title>GPU validation</title
+><canvas id="test"></canvas>
+<pre id="result">Running</pre>
+<script type="module">
+  import { OilEngine } from "../src/engine.js";
+  import {
+    paint,
+    pack,
+    unhalf,
+    composite,
+    reflectance,
+    deltaE,
+  } from "../src/color.js";
+  window.runGPU = async function () {
+    const t = await fetch("../reference/tables.json").then((r) => r.json()),
+      canvas = document.querySelector("canvas");
+    const logs = [];
+    const assert = (x, m) => {
+      if (!x) throw Error(m);
+    };
+    const e = await OilEngine.create(canvas, t, {
+      nx: 32,
+      ny: 24,
+      nl: 3,
+      width: (32 * 0.5) / 1024,
+      shading: false,
+    });
+    window.engine = e;
+    logs.push("All 3-layer WGSL pipelines compiled");
+    e.config.radius = 5;
+    e.beginStroke({ x: 8, y: 12, pressure: 1, time: 0 });
+    e.moveStroke({ x: 24, y: 12, pressure: 1, time: 200 });
+    e.endStroke();
+    e.step({ fluid: false });
+    await e.device.queue.onSubmittedWorkDone();
+    let l = new Float32Array(await e.read("l0"));
+    assert(
+      l.some((x) => x > 0),
+      "Brush deposited no paint",
+    );
+    for (let i = 0; i < l.length; i += 4)
+      assert(l[i] >= 0 && l[i + 1] >= 0 && l[i + 1] <= l[i], "Invalid layer");
+    logs.push("Brush deposit nonnegative");
+    e.color = "#285ac8";
+    e.beginStroke({ x: 16, y: 7, pressure: 0.8, time: 300 });
+    e.moveStroke({ x: 16, y: 18, pressure: 0.8, time: 600 });
+    e.endStroke();
+    e.step({ fluid: false });
+    await e.device.queue.onSubmittedWorkDone();
+    const l1 = new Float32Array(await e.read("l1"));
+    assert(
+      l1.some((x) => x > 0),
+      "No separate surface film was retained",
+    );
+    logs.push("Brush retains a separate contact film above underlying paint");
+    const before = await e.read("l0");
+    for (let i = 0; i < 5; i++) e.step();
+    await e.device.queue.onSubmittedWorkDone();
+    const velocity = new Float32Array(await e.read("vel"));
+    assert(velocity.every(Number.isFinite), "Nonfinite velocity");
+    logs.push("Fluid passes and readback finite");
+    e.dryRequested = true;
+    e.step({ fluid: false });
+    await e.device.queue.onSubmittedWorkDone();
+    for (let k = 0; k < 3; k++) {
+      const a = new Float32Array(await e.read("l" + k));
+      for (let i = 0; i < a.length; i += 4)
+        assert(a[i] === 0, "Manual dry left wet paint");
+    }
+    const bed = new Float32Array(await e.read("bed"));
+    assert(
+      bed.some((x, i) => i % 20 === 0 && x > 0),
+      "Bake did not preserve height",
+    );
+    logs.push("Manual drying bakes all layers");
+    assert(e.errors.length === 0, e.errors.join("\n"));
+    e.destroy();
+    return logs;
+  };
+  try {
+    const logs = await window.runGPU();
+    window.testResult = { ok: true, logs };
+    document.querySelector("pre").textContent = JSON.stringify(
+      window.testResult,
+    );
+  } catch (e) {
+    window.testResult = { ok: false, error: e.stack || e.message };
+    document.querySelector("pre").textContent = JSON.stringify(
+      window.testResult,
+    );
+  }
+</script>

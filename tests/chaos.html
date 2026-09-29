@@ -1,0 +1,228 @@
+<!doctype html><meta charset="utf-8" /><style>
+  body {
+    font: 14px sans-serif;
+    background: #e9e9e6;
+    margin: 12px;
+  }
+  #cases {
+    display: grid;
+    grid-template-columns: repeat(3, 384px);
+    gap: 8px;
+  }
+  img {
+    width: 384px;
+    height: 240px;
+    display: block;
+  }
+  h3 {
+    margin: 4px;
+    font-size: 14px;
+  }
+  pre {
+    font-size: 10px;
+    white-space: pre-wrap;
+  }
+</style>
+<div id="cases"></div>
+<pre>Running</pre>
+<script type="module">
+  import { OilEngine } from "../src/engine.js";
+  const tables = await fetch("../reference/tables.json").then((r) => r.json()),
+    logs = [];
+  let time = 0;
+  async function step(e, fluid = true) {
+    e.step({ fluid });
+    await e.device.queue.onSubmittedWorkDone();
+  }
+  async function stroke(
+    e,
+    color,
+    points,
+    { empty = false, pressure = 0.75, fluid = true } = {},
+  ) {
+    e.color = color;
+    e.beginStroke(
+      { x: points[0][0], y: points[0][1], pressure, time: (time += 16) },
+      { empty },
+    );
+    await step(e, fluid);
+    for (const [x, y] of points.slice(1)) {
+      e.moveStroke({ x, y, pressure, time: (time += 16) });
+      await step(e, fluid);
+    }
+    e.endStroke();
+  }
+  async function pixels(e) {
+    const b = await createImageBitmap(await e.exportPNG()),
+      c = new OffscreenCanvas(384, 240),
+      ctx = c.getContext("2d");
+    ctx.drawImage(b, 0, 0);
+    return ctx.getImageData(0, 0, 384, 240).data;
+  }
+  function sample(p, x, y) {
+    return Array.from(p.slice((y * 384 + x) * 4, (y * 384 + x) * 4 + 3));
+  }
+  async function show(e, name) {
+    await step(e, false);
+    const section = document.createElement("section"),
+      h = document.createElement("h3"),
+      img = document.createElement("img");
+    h.textContent = name;
+    img.src = URL.createObjectURL(await e.exportPNG());
+    section.append(h, img);
+    document.querySelector("#cases").append(section);
+  }
+  try {
+    for (let test = 0; test < 6; test++) {
+      const e = await OilEngine.create(
+        document.createElement("canvas"),
+        tables,
+        {
+          nx: 384,
+          ny: 240,
+          nl: 2,
+          width: (384 * 0.5) / 1024,
+          radius: 48,
+          phi: 1,
+          shading: true,
+        },
+      );
+      try {
+        if (test === 0) {
+          let taps = [];
+          for (const [r, x] of [
+            [16, 45],
+            [48, 135],
+            [96, 285],
+          ]) {
+            e.config.radius = r;
+            await stroke(e, "#c83228", [[x, 120]], { fluid: false });
+            const a = new Float32Array(await e.read("l0"));
+            taps.push({ radius: r, centerDepth: a[(120 * 384 + x) * 4] });
+          }
+          await show(e, "1. One tap: radius 16 / 48 / 96");
+          logs.push({ test: "tap radius", taps });
+        }
+        if (test === 1) {
+          await stroke(
+            e,
+            "#c83228",
+            [
+              [60, 120],
+              [324, 120],
+            ],
+            { fluid: false },
+          );
+          await stroke(
+            e,
+            "#2c6496",
+            [
+              [192, 40],
+              [192, 200],
+            ],
+            { fluid: false },
+          );
+          e.config.shading = false;
+          await step(e, false);
+          const before = await pixels(e);
+          e.config.radius = 36;
+          await stroke(e, "#fffaf0", [[192, 120]], {
+            pressure: 0.001,
+            fluid: false,
+          });
+          const after = await pixels(e);
+          logs.push({
+            test: "third layer tiny-pressure tap",
+            before: sample(before, 192, 120),
+            after: sample(after, 192, 120),
+          });
+          e.config.shading = true;
+          await show(e, "2. Red + blue + almost weightless white tap");
+        }
+        if (test === 2) {
+          e.config.radius = 30;
+          for (let j = 0; j < 12; j++) {
+            await stroke(
+              e,
+              j % 2 ? "#fffaf0" : "#2c6496",
+              [[60 + j * 23, 120]],
+              { fluid: false },
+            );
+          }
+          await show(e, "3. Alternating overlapping taps");
+        }
+        if (test === 3) {
+          await stroke(e, "#c83228", [
+            [50, 80],
+            [330, 80],
+          ]);
+          await stroke(e, "#2c6496", [
+            [50, 160],
+            [330, 160],
+          ]);
+          e.config.radius = 35;
+          await stroke(e, "#fffaf0", [
+            [75, 40],
+            [100, 180],
+            [180, 50],
+            [240, 180],
+            [310, 40],
+          ]);
+          await show(e, "4. White dragged through red and blue");
+        }
+        if (test === 4) {
+          await stroke(e, "#c83228", [
+            [50, 80],
+            [330, 80],
+          ]);
+          await stroke(e, "#2c6496", [
+            [50, 160],
+            [330, 160],
+          ]);
+          e.config.radius = 35;
+          await stroke(
+            e,
+            "#fffaf0",
+            [
+              [75, 40],
+              [100, 180],
+              [180, 50],
+              [240, 180],
+              [310, 40],
+            ],
+            { empty: true },
+          );
+          await show(e, "5. Empty brush through red and blue");
+        }
+        if (test === 5) {
+          let seed = 9431;
+          const random = () => {
+            seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+            return seed / 4294967296;
+          };
+          const colors = ["#c83228", "#2c6496", "#fffaf0", "#f0d254"];
+          e.config.phi = 0.35;
+          e.config.tiltY = 15;
+          for (let j = 0; j < 24; j++) {
+            e.config.radius = 12 + random() * 50;
+            const points = Array.from({ length: j % 3 === 0 ? 1 : 5 }, () => [
+              30 + random() * 324,
+              30 + random() * 180,
+            ]);
+            await stroke(e, colors[j % 4], points);
+          }
+          await show(e, "6. 24 mixed strokes, wet, tilt 15 degrees");
+          for (let j = 0; j < 180; j++) await step(e);
+          await show(e, "7. Same painting after 3 simulated seconds");
+        }
+        if (e.errors.length) throw Error(e.errors.join("\n"));
+      } finally {
+        e.destroy();
+      }
+    }
+    window.testResult = { ok: true, logs };
+  } catch (e) {
+    window.testResult = { ok: false, error: e.stack, logs };
+  }
+  document.querySelector("pre").textContent = JSON.stringify(window.testResult);
+</script>

@@ -1,0 +1,79 @@
+<!doctype html><meta charset="utf-8" /><canvas></canvas>
+<pre>Running</pre>
+<script type="module">
+  import { OilEngine } from "../src/engine.js";
+  try {
+    const tables = await fetch("../reference/tables.json").then((r) =>
+      r.json(),
+    );
+    async function run(full) {
+      const e = await OilEngine.create(
+        document.querySelector("canvas"),
+        tables,
+        {
+          nx: 192,
+          ny: 128,
+          nl: 2,
+          width: (192 * 0.5) / 1024,
+          radius: 36,
+          shading: false,
+          phi: 0.1,
+          tiltX: 30,
+        },
+      );
+      e.fullGridForTest = full;
+      e.color = "#ffffff";
+      let time = 0;
+      for (const [x, y, dx] of [
+        [40, 32, 105],
+        [150, 90, -110],
+        [30, 80, 125],
+      ]) {
+        e.beginStroke({ x, y, pressure: 0.75, time });
+        for (let j = 1; j <= 8; j++) {
+          time += 16;
+          e.moveStroke({
+            x: x + (dx * j) / 8,
+            y: y + 10 * Math.sin(j),
+            pressure: 0.75,
+            time,
+          });
+          e.step({ present: false });
+          await e.device.queue.onSubmittedWorkDone();
+        }
+        e.endStroke();
+        for (let j = 0; j < 8; j++) e.step({ present: false });
+      }
+      await e.device.queue.onSubmittedWorkDone();
+      const state = await Promise.all(
+        ["l0", "l1", "vel"].map(
+          async (key) => new Float32Array(await e.read(key)),
+        ),
+      );
+      if (e.errors.length) throw Error(e.errors.join("\n"));
+      e.destroy();
+      return state;
+    }
+    const tiled = await run(false),
+      full = await run(true);
+    let max = 0;
+    for (let k = 0; k < tiled.length; k++)
+      for (let i = 0; i < tiled[k].length; i++) {
+        if (k < 2 && i % 4 === 3) continue;
+        max = Math.max(max, Math.abs(tiled[k][i] - full[k][i]));
+      }
+    if (max > 1e-7) throw Error("Tiled/full-grid mismatch " + max);
+    window.testResult = {
+      ok: true,
+      logs: [
+        {
+          test: "Active tiles equal full-grid dispatch",
+          maxAbsoluteDifference: max,
+        },
+      ],
+    };
+  } catch (e) {
+    window.testResult = { ok: false, error: e.stack || e.message };
+  }
+  document.querySelector("pre").textContent = JSON.stringify(window.testResult);
+</script>
