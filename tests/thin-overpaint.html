@@ -1,0 +1,27 @@
+<!doctype html><meta charset="utf-8"><style>body{background:#222;color:white;font:14px sans-serif}#cases{display:grid;grid-template-columns:512px 512px;gap:12px}img{width:512px;height:192px}</style><div id="cases"></div><pre id="result">Running</pre>
+<script type="module">
+import {OilEngine} from '../src/engine.js';
+import {paint,pack} from '../src/color.js';
+try {
+const tables=await fetch('../reference/tables.json').then(r=>r.json()), logs=[];
+for(const dry of [false,true]) for(const fluid of [false,true]) {
+ const canvas=document.createElement('canvas'), e=await OilEngine.create(canvas,tables,{nx:512,ny:192,width:.25,radius:9,phi:.51,tiltY:10,shading:false});
+ const N=512*192,a=new Float32Array(N*4),s=new Uint32Array(N*20),red=paint([200,50,40],tables);
+ for(let i=0;i<N;i++){a[i*4]=.001;a[i*4+1]=.001;for(let j=0;j<19;j++)s[i*20+j]=pack(red.a[2*j],red.a[2*j+1]);s[i*20+19]=pack(red.beta,0);}
+ e.device.queue.writeBuffer(e.buffers.l0,0,a);e.device.queue.writeBuffer(e.buffers.s0,0,s);
+ if(dry){e.dryRequested=true;e.step({fluid:false});await e.device.queue.onSubmittedWorkDone();}
+ for(const [color,y] of [['#fffaf0',45],['#8e918d',100],['#252923',155]]) {
+  e.color=color;e.beginStroke({x:25,y,pressure:.75,time:0});
+  for(let j=1;j<=60;j++){e.moveStroke({x:25+j*7.5,y:y-j*.4,pressure:.75,time:j*16});e.step({fluid});await e.device.queue.onSubmittedWorkDone();}
+  e.endStroke();
+ }
+ const blob=await e.exportPNG(),bitmap=await createImageBitmap(blob),temp=new OffscreenCanvas(512,192),ctx=temp.getContext('2d');ctx.drawImage(bitmap,0,0);const p=ctx.getImageData(0,0,512,192).data;
+ let maxJump=0;for(let x=120;x<440;x++){let y=Math.round(45-(x-25)*.4/7.5);let before=Math.round(45-(x-26)*.4/7.5);maxJump=Math.max(maxJump,Math.abs(p[(y*512+x)*4+1]-p[(before*512+x-1)*4+1]));}
+ const box=document.createElement('div');box.textContent=`${dry?'Dry':'Wet'} red / fluid ${fluid} / jump ${maxJump}`;const img=new Image();img.src=URL.createObjectURL(blob);box.append(img);document.querySelector('#cases').append(box);
+ logs.push({dry,fluid,maxJump,errors:e.errors});e.destroy();
+}
+// Compare against identical strokes without fluid: cross-strand texture is
+// intentional, but flow must not introduce repeated longitudinal seams.
+window.testResult={ok:logs.every(l=>!l.errors.length&&l.maxJump<=4)&&logs.filter(l=>l.fluid).every(l=>l.maxJump<=logs.find(b=>!b.fluid&&b.dry===l.dry).maxJump+1),logs};document.querySelector('#result').textContent=JSON.stringify(testResult,null,2);
+}catch(e){window.testResult={ok:false,error:e.stack};document.querySelector('#result').textContent=e.stack;}
+</script>

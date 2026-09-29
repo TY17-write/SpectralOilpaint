@@ -35,7 +35,10 @@ export const defaults = {
   normalRadius: 3,
   referenceMode: false,
   paintPickup: 0.05,
-  paintDrag: 0.15,
+  // Painting carries pigment through the surface-contact brush reservoir.
+  // A second planar velocity impulse leaves circular flow seams per frame.
+  // Smudging keeps its separate drag; gravity remains active in both modes.
+  paintDrag: 0,
   maxStampSpacing: 2,
   contactDepthMin: 0.000015,
   contactDepthPressure: 0.000085,
